@@ -5,12 +5,13 @@
 #ifndef CONNECTION_HANDLER_H
 #define CONNECTION_HANDLER_H
 
+#include "SessionManager.h"
 #include "RtspMessage.h"
 #include <string>
 
 class ConnectionHandler {
 public:
-    explicit ConnectionHandler(int client_socket);
+    explicit ConnectionHandler(int client_socket, const std::string& client_ip);
     ~ConnectionHandler();
 
     void process();
@@ -27,7 +28,7 @@ private:
     void handle_teardown(const RTSPMessage& request, RTSPMessage& response);
 
     int client_socket_;
-
+    std::string  client_ip_;
     std::string generate_unique_session_id();
 };
 

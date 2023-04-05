@@ -61,16 +61,17 @@ void RTSPServer::run() {
             continue;
         }
 
-        LOG_INFO("Client connected from: " + std::string(inet_ntoa(client_addr.sin_addr)));
+        std::string client_ip = std::string(inet_ntoa(client_addr.sin_addr));
+        LOG_INFO("Client connected from: {}", client_ip);
 
         // Create a new ConnectionHandler for each client connection
-        std::thread client_thread(&RTSPServer::handle_client, this, client_fd);
+        std::thread client_thread(&RTSPServer::handle_client, this, client_fd, client_ip);
         client_thread.detach();
     }
 }
 
-void RTSPServer::handle_client(int client_fd) {
-    auto handler = std::make_shared<ConnectionHandler>(client_fd);
+void RTSPServer::handle_client(int client_fd, const std::string& client_ip) {
+    auto handler = std::make_shared<ConnectionHandler>(client_fd, client_ip);
     {
         std::unique_lock<std::mutex> lock(connections_mutex_);
         connections_[client_fd] = handler;

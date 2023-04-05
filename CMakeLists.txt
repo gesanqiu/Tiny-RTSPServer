@@ -46,7 +46,11 @@ add_executable(RTSPServer
         ConnectionHandler.cpp
         RtspMessage.cpp
         RtspServer.cpp
-        ThreadPool.cpp)
+        ThreadPool.cpp
+        SessionManager.cpp
+        Session.cpp
+        MediaStreamHandler.cpp
+        RtpRtcpHandler.cpp)
 
 target_link_libraries(${PROJECT_NAME}
         pthread

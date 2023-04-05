@@ -13,8 +13,8 @@
 #include <sstream>
 #include <iomanip>
 
-ConnectionHandler::ConnectionHandler(int client_socket)
-        : client_socket_(client_socket) {
+ConnectionHandler::ConnectionHandler(int client_socket, const std::string& client_ip)
+        : client_socket_(client_socket), client_ip_(client_ip) {
 }
 
 ConnectionHandler::~ConnectionHandler() {
@@ -68,11 +68,6 @@ void ConnectionHandler::process() {
             // Close the connection if it's a TEARDOWN request
             if (request.method() == RTSPMessage::Method::TEARDOWN) {
                 break;
-            } else if (request.method() == RTSPMessage::Method::PLAY) {
-                // Only use for RTSPServer unit test
-                while (true) {
-                    usleep(40 * 1000);
-                }
             }
         }
     } catch (const std::runtime_error& e) {
@@ -157,6 +152,8 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
             password = url_match[2].str();
             host = url_match[3].str();
             port = url_match[4].str();
+        } else {
+            std::runtime_error("Error DESCRIBE request.");
         }
     }
     LOG_INFO("username: {}, password: {}, host:{}, port: {}", username, password, host, port);
@@ -183,28 +180,33 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
     // Parse transport and client ports from the request
     auto transport = request.get_header_value("Transport");
     std::string client_port_range;
+    int client_rtp_port = -1, client_rtcp_port = -1;
 
     std::regex transport_regex("RTP/AVP;unicast;client_port=(\\d+)-(\\d+)");
     std::smatch transport_match;
     if (std::regex_search(transport, transport_match, transport_regex)) {
         if (transport_match.size() > 2) {
+            client_rtp_port = std::stoi(transport_match[1].str());
+            client_rtcp_port = std::stoi(transport_match[2].str());
             client_port_range = transport_match[1].str() + "-" + transport_match[2].str();
+        } else {
+            throw std::runtime_error("Error SETUP request");
         }
     }
 
     // Generate server ports and SSRC
     std::string server_port_range = "9000-9001"; // You can generate server ports dynamically
-    std::string ssrc = "1A2B3C4D"; // You can generate an SSRC dynamically
 
     // Generate a session ID
     std::string session_id = generate_unique_session_id();
-//    session_manager_.create_session(session_id);
-    LOG_INFO("Session id: {}", session_id);
+    // 后续实现时，MediaSource应该从MediaSourceManager里取出并传递，来创建Session对象
+    SessionManager::instance().create_session(session_id, request.uri(), 9000, 9001, client_ip_, client_rtp_port, client_rtcp_port);
+    LOG_INFO("Create session: {}", session_id);
     // Build the response
     response.set_protocol(request.protocol());
     response.set_status_code(RTSPMessage::StatusCode::OK);
     response.set_cseq(request.cseq());
-    response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range + ";ssrc=" + ssrc);
+    response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range + ";");
     response.set_headers("Session", session_id);
 }
 
@@ -213,29 +215,68 @@ void ConnectionHandler::handle_play(const RTSPMessage& request, RTSPMessage& res
     LOG_INFO("Play session: {}", session_id);
 
     response.set_protocol(request.protocol());
-    response.set_status_code(RTSPMessage::StatusCode::OK);
-    response.set_cseq(request.cseq());
-    response.set_headers("Session", session_id);
-    std::string range = request.get_header_value("Range");
-    response.set_headers("Range", range);
-    std::string rtp_info = "url=" + request.uri() + ";seq=1;rtptime=0";
-    response.set_headers("RTP-Info", rtp_info);
+    // Check if the session exists
+    if (SessionManager::instance().session_exists(session_id)) {
+        // Start playing the session
+        SessionManager::instance().get_session(session_id)->start();
+
+        // Build the response
+        response.set_status_code(RTSPMessage::StatusCode::OK);
+        response.set_cseq(request.cseq());
+        response.set_headers("Session", session_id);
+
+        // Get the Range header from the request and set it in the response
+        std::string range = request.get_header_value("Range");
+        response.set_headers("Range", range);
+
+        // Set the RTP-Info header in the response
+        std::string rtp_info = "url=" + request.uri() + ";seq=1;rtptime=0";
+        response.set_headers("RTP-Info", rtp_info);
+    } else {
+        // Session not found, return a "Not Found" response
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+    }
 }
 
 void ConnectionHandler::handle_pause(const RTSPMessage& request, RTSPMessage& response) {
     std::string session_id = request.get_header_value("Session");
     LOG_INFO("Pause session: {}", session_id);
+
     response.set_protocol(request.protocol());
-    response.set_status_code(RTSPMessage::StatusCode::OK);
-    response.set_cseq(request.cseq());
-    response.set_headers("Session", session_id);
+    // Check if the session exists
+    if (SessionManager::instance().session_exists(session_id)) {
+        // Pause the session
+        SessionManager::instance().get_session(session_id)->pause();
+
+        // Build the response
+        response.set_status_code(RTSPMessage::StatusCode::OK);
+        response.set_cseq(request.cseq());
+        response.set_headers("Session", session_id);
+    } else {
+        // Session not found, return a "Not Found" response
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+    }
 }
 
 void ConnectionHandler::handle_teardown(const RTSPMessage& request, RTSPMessage& response) {
     std::string session_id = request.get_header_value("Session");
     LOG_INFO("Teardown session: {}", session_id);
+
     response.set_protocol(request.protocol());
-    response.set_status_code(RTSPMessage::StatusCode::OK);
-    response.set_cseq(request.cseq());
-    response.set_headers("Session", session_id);
+    // Check if the session exists
+    if (SessionManager::instance().session_exists(session_id)) {
+        // Terminate the session
+        SessionManager::instance().terminate_session(session_id);
+
+        // Build the response
+        response.set_status_code(RTSPMessage::StatusCode::OK);
+        response.set_cseq(request.cseq());
+        response.set_headers("Session", session_id);
+    } else {
+        // Session not found, return a "Not Found" response
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+    }
 }
