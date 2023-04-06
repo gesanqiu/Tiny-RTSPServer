@@ -28,6 +28,11 @@ public:
 
     // Get the timestamp increment per frame for the media source
     virtual uint32_t get_timestamp_increment() const = 0;
+
+    virtual const char* get_frame_buf() const = 0;
+
+    virtual void open() = 0;
+    virtual void close() = 0;
 };
 
 class H264MediaSource : public MediaSource {
@@ -39,14 +44,15 @@ public:
     std::string get_codec_name() const override;
     uint8_t get_payload_type() const override;
     uint32_t get_timestamp_increment() const override;
-
-    char* get_frame_buf();
+    const char* get_frame_buf() const override;
+    void open() override;
+    void close() override;
 
 private:
     // You can add private member variables and methods for H.264 encoding and frame generation
     std::string url_;
     std::ifstream h264_file_;
-    char frame_buf_[MAX_FRAME_SIZE];
+    char frame_buf_[MAX_FRAME_SIZE + 10];
 };
 
 #endif //MEDIASTREAMHANDLER_H

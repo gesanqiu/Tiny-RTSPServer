@@ -200,8 +200,10 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
     // Generate a session ID
     std::string session_id = generate_unique_session_id();
     // 后续实现时，MediaSource应该从MediaSourceManager里取出并传递，来创建Session对象
-    SessionManager::instance().create_session(session_id, request.uri(), 9000, 9001, client_ip_, client_rtp_port, client_rtcp_port);
-    LOG_INFO("Create session: {}", session_id);
+    SessionManager::instance().create_session(session_id, request.uri(),
+                                              9000, 9001,
+                                              client_ip_, client_rtp_port, client_rtcp_port);
+    LOG_INFO("Create session: {}, {}, {}", session_id, client_rtp_port, client_rtcp_port);
     // Build the response
     response.set_protocol(request.protocol());
     response.set_status_code(RTSPMessage::StatusCode::OK);

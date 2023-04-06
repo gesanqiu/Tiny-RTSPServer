@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-const int MAX_RTP_PACKET_SIZE = 1024;
+const size_t MAX_RTP_PACKET_SIZE = 512 * 1024;
 
 struct RTPHeader {
     enum PayloadType : uint8_t {
@@ -21,12 +21,12 @@ struct RTPHeader {
         AAC = 97
     };
     // RTP header fields
-    uint8_t version_ : 2 = 2;
+    uint8_t csrc_count_ : 4;
     uint8_t padding_ : 1;
     uint8_t extension_ : 1;
-    uint8_t csrc_count_ : 4;
-    uint8_t marker_ : 1;
+    uint8_t version_ : 2;
     uint8_t payload_type_ : 7;
+    uint8_t marker_ : 1;
     uint16_t sequence_number_;
     uint32_t timestamp_;
     uint32_t ssrc_;
@@ -44,11 +44,12 @@ public:
                    uint32_t timestamp_increment);
     ~RtpRtcpHandler();
 
-    void send_rtp_packet(const uint8_t* payload, size_t payload_size);
+    void send_rtp_packet(const char* payload, size_t payload_size);
     void receive_rtcp_packet();
 
 private:
-    int server_fd_;
+    int rtp_socket_;
+    int rtcp_socket_;
     std::string ip_;
     int rtp_port_;
     int rtcp_port_;
@@ -59,7 +60,7 @@ private:
     uint32_t timestamp_increment_;
 
     void send_rtcp_packet();
-    char rtp_buf_[MAX_RTP_PACKET_SIZE];
+    char rtp_buf_[MAX_RTP_PACKET_SIZE + 10];
 };
 
 #endif // RTP_RTCP_HANDLER_H

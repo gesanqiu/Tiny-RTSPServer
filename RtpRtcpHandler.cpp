@@ -3,6 +3,7 @@
 //
 
 #include "RtpRtcpHandler.h"
+#include "Logger.h"
 #include <random>
 #include <cstring>
 
@@ -16,64 +17,114 @@ RtpRtcpHandler::RtpRtcpHandler(const int server_rtp_port, const int server_rtcp_
     std::uniform_int_distribution<uint32_t> dist(1, UINT32_MAX);
     ssrc_ = dist(mt);
 
-    server_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (server_fd_ < 0) {
+    rtp_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (rtp_socket_ < 0) {
         throw std::runtime_error("RtpRtcpHandler create server socket failed");
     }
 
-    memset(&client_addr_, 0, sizeof(client_addr_));
-    client_addr_.sin_family = AF_INET;
-    client_addr_.sin_port = htons(rtp_port);
-    if (inet_pton(AF_INET, ip.c_str(), &client_addr_.sin_addr) <= 0) {
-        // Handle the error (e.g., throw an exception or return a status code)
-        throw std::runtime_error("RtpRtcpHandler create client udp socket failed");
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(server_rtp_port);
+    addr.sin_addr.s_addr = inet_addr("0.0.0.0");
+
+    if (bind(rtp_socket_, (struct sockaddr*)&addr, sizeof(struct sockaddr)) < 0) {
+        throw std::runtime_error("Bind rtp socket with server failed.");
     }
 }
 
 RtpRtcpHandler::~RtpRtcpHandler() {
+    close(rtp_socket_);
 }
 
-void RtpRtcpHandler::send_rtp_packet(const uint8_t* payload, size_t payload_size) {
+void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
     constexpr size_t max_payload_size = MAX_RTP_PACKET_SIZE - sizeof(RTPHeader);
-    size_t remaining_payload_size = payload_size;
-    const uint8_t* current_payload_position = payload;
-    RTPHeader rtp_packet;
-    rtp_packet.version_ = 2;
-    rtp_packet.padding_ = 0;
-    rtp_packet.extension_ = 0;
-    rtp_packet.csrc_count_ = 0;
-    rtp_packet.payload_type_ = RTPHeader::PayloadType::H264;
-    rtp_packet.timestamp_ = htonl(timestamp_);
-    rtp_packet.ssrc_ = htonl(ssrc_);
-
-    while (remaining_payload_size > 0) {
-        // Calculate the size of the payload for this packet
-        size_t current_payload_size = std::min(remaining_payload_size, max_payload_size);
-
-        rtp_packet.marker_ = (remaining_payload_size == current_payload_size) ? 1 : 0;
-        rtp_packet.sequence_number_ = htons(rtp_sequence_number_++);
-
-        // Allocate a buffer for the RTP packet with the header and payload
-        size_t rtp_packet_size = sizeof(RTPHeader) + current_payload_size;
-
-        // Copy the RTP header to the buffer
-        memcpy(rtp_buf_, &rtp_packet, sizeof(RTPHeader));
-
-        // Copy the payload data to the buffer, right after the RTP header
-        memcpy(rtp_buf_ + sizeof(RTPHeader), current_payload_position, current_payload_size);
-
-        // Send the RTP packet through the connected UDP socket
-        ssize_t bytes_sent = sendto(server_fd_, rtp_buf_, rtp_packet_size, 0,
-                                    (struct sockaddr *) &client_addr_, sizeof(client_addr_));
-
-        // Check if the packet was sent successfully
-        if (bytes_sent != rtp_packet_size) {
-            // Handle the error (e.g., log the error, throw an exception, or return a status code)
-        }
-
-        current_payload_position += current_payload_size;
-        remaining_payload_size -= current_payload_size;
+    size_t start_code, nal_unit_size;
+    if (payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01) {
+        nal_unit_size = payload_size - 3;
+        start_code = 3;
+    } else if (payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x01) {
+        nal_unit_size = payload_size - 4;
+        start_code = 4;
+    } else {
+        LOG_ERROR("Error format H.264 frame, start code fault.");
+        return ;
     }
+
+    // Check if the payload size exceeds the max_payload_size
+    if (nal_unit_size > max_payload_size) {
+        // Fragment the NAL unit
+        size_t offset = start_code; // Skip the start code
+        bool first_fragment = true;
+        ssize_t send_bytes = 0;
+        while (offset < payload_size) {
+            // Calculate the size of the current fragment
+            size_t fragment_size = std::min(max_payload_size, payload_size - offset);
+
+            // Create the FU header
+            uint8_t fu_header = (first_fragment ? 0x80 : 0x00) | (offset + fragment_size == payload_size ? 0x40 : 0x00) | (payload[start_code] & 0x1F);
+
+            // Create the RTP packet with the FU header
+            RTPHeader rtp_header;
+            rtp_header.version_ = 2;
+            rtp_header.padding_ = 0;
+            rtp_header.extension_ = 0;
+            rtp_header.csrc_count_ = 0;
+            rtp_header.marker_ = offset + fragment_size == payload_size ? 1 : 0;
+            rtp_header.payload_type_ = RTPHeader::PayloadType::H264;
+            rtp_header.sequence_number_ = htons(rtp_sequence_number_++);
+            rtp_header.timestamp_ = htonl(timestamp_);
+            rtp_header.ssrc_ = htonl(ssrc_);
+
+            size_t header_size = sizeof(RTPHeader);
+            memcpy(rtp_buf_, &rtp_header, header_size);
+            rtp_buf_[header_size] = (payload[start_code] & 0x60) | 28;   // FU indicator (F, NRI, and type)
+            rtp_buf_[header_size + 1] = fu_header;   // FU header (S, E, R, and type)
+            memcpy(rtp_buf_ + header_size + 2, payload + offset, fragment_size);
+
+            // Send the RTP packet through the connected UDP socket
+            memset(&client_addr_, 0, sizeof(client_addr_));
+            client_addr_.sin_family = AF_INET;
+            client_addr_.sin_port = htons(rtp_port_);
+            if (inet_pton(AF_INET, ip_.c_str(), &client_addr_.sin_addr) <= 0) {
+                throw std::runtime_error("RtpRtcpHandler create client udp socket failed");
+            }
+            size_t rtp_packet_size = header_size + fragment_size;
+            ssize_t ret = sendto(rtp_socket_, rtp_buf_, rtp_packet_size, 0,
+                                 (struct sockaddr *)&client_addr_, sizeof(client_addr_));
+            send_bytes += ret;
+            // Update the offset and first_fragment flag
+            offset += fragment_size;
+            first_fragment = false;
+        }
+    } else {
+        // Create the RTP packet without fragmentation
+        RTPHeader rtp_header;
+        rtp_header.version_ = 2;
+        rtp_header.padding_ = 0;
+        rtp_header.extension_ = 0;
+        rtp_header.csrc_count_ = 0;
+        rtp_header.marker_ = 1;
+        rtp_header.payload_type_ = RTPHeader::PayloadType::H264;
+        rtp_header.sequence_number_ = htons(rtp_sequence_number_++);
+        rtp_header.timestamp_ = htonl(timestamp_);
+        rtp_header.ssrc_ = htonl(ssrc_);
+
+        size_t header_size = sizeof(RTPHeader);
+        memcpy(rtp_buf_, &rtp_header, header_size);     // copy header data
+        memcpy(rtp_buf_ + header_size, payload + start_code, payload_size - start_code);
+
+        // Send the RTP packet
+        memset(&client_addr_, 0, sizeof(client_addr_));
+        client_addr_.sin_family = AF_INET;
+        client_addr_.sin_port = htons(rtp_port_);
+        if (inet_pton(AF_INET, ip_.c_str(), &client_addr_.sin_addr) <= 0) {
+            throw std::runtime_error("RtpRtcpHandler create client udp socket failed");
+        }
+        size_t rtp_packet_size = header_size + payload_size - start_code;
+        ssize_t  ret = sendto(rtp_socket_, rtp_buf_, rtp_packet_size, 0,
+                              (struct sockaddr *)&client_addr_, sizeof(client_addr_));
+    }
+
     timestamp_ += timestamp_increment_;
 }
 

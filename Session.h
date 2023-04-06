@@ -28,7 +28,7 @@ public:
 
 private:
     std::string session_id_;
-
+    bool is_active_;
     std::unique_ptr<MediaSource> media_source_;
     std::unique_ptr<RtpRtcpHandler> rtp_rtcp_handler_;
 };
