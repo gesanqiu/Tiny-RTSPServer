@@ -160,7 +160,7 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
 
     std::ostringstream  oss;
     oss << "v=0\r\n"
-           "o=- 666 1 IN IP4 " << host << "\r\n"
+           "o=- 9" << time(NULL) << " 1 IN IP4 " << host << "\r\n"
            "t=0 0\r\n"
            "a=control:*\r\n"
            "m=video 0 RTP/AVP 96\r\n"
@@ -208,7 +208,7 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
     response.set_protocol(request.protocol());
     response.set_status_code(RTSPMessage::StatusCode::OK);
     response.set_cseq(request.cseq());
-    response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range + ";");
+    response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range);
     response.set_headers("Session", session_id);
 }
 

@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-const size_t MAX_RTP_PACKET_SIZE = 512 * 1024;
+const size_t MAX_RTP_PACKET_SIZE = 1024;
 
 struct RTPHeader {
     enum PayloadType : uint8_t {

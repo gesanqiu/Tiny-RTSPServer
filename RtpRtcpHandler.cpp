@@ -53,12 +53,12 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
     // Check if the payload size exceeds the max_payload_size
     if (nal_unit_size > max_payload_size) {
         // Fragment the NAL unit
-        size_t offset = start_code; // Skip the start code
+        size_t offset = start_code + 1; // Skip the start code and NALU type byte
         bool first_fragment = true;
         ssize_t send_bytes = 0;
         while (offset < payload_size) {
             // Calculate the size of the current fragment
-            size_t fragment_size = std::min(max_payload_size, payload_size - offset);
+            size_t fragment_size = std::min(max_payload_size - 2, payload_size - offset);   // 2 bytes for FU Indicator and FU Header
 
             // Create the FU header
             uint8_t fu_header = (first_fragment ? 0x80 : 0x00) | (offset + fragment_size == payload_size ? 0x40 : 0x00) | (payload[start_code] & 0x1F);
@@ -88,7 +88,7 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
             if (inet_pton(AF_INET, ip_.c_str(), &client_addr_.sin_addr) <= 0) {
                 throw std::runtime_error("RtpRtcpHandler create client udp socket failed");
             }
-            size_t rtp_packet_size = header_size + fragment_size;
+            size_t rtp_packet_size = header_size + 2 + fragment_size;
             ssize_t ret = sendto(rtp_socket_, rtp_buf_, rtp_packet_size, 0,
                                  (struct sockaddr *)&client_addr_, sizeof(client_addr_));
             send_bytes += ret;
@@ -96,6 +96,7 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
             offset += fragment_size;
             first_fragment = false;
         }
+        timestamp_ += timestamp_increment_;
     } else {
         // Create the RTP packet without fragmentation
         RTPHeader rtp_header;
@@ -123,9 +124,11 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
         size_t rtp_packet_size = header_size + payload_size - start_code;
         ssize_t  ret = sendto(rtp_socket_, rtp_buf_, rtp_packet_size, 0,
                               (struct sockaddr *)&client_addr_, sizeof(client_addr_));
+        if ((payload[start_code] & 0x1F) != 7 && (payload[start_code] & 0x1F) != 8) {   // Skip SPS & PPS
+            timestamp_ += timestamp_increment_;
+        }
     }
 
-    timestamp_ += timestamp_increment_;
 }
 
 void RtpRtcpHandler::receive_rtcp_packet() {
