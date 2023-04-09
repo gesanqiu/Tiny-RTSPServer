@@ -3,28 +3,30 @@
 //
 
 #include "MediaSourceManager.h"
+#include "Logger.h"
 
-void MediaSourceManager::add_media_source(const std::string& stream_name, const std::string& media_source) {
-    media_sources_[url_prefix_ + stream_name + url_suffix_] = media_source;
+void MediaSourceManager::add_media_source(const std::string& stream_name, const std::string& media_url, const MediaType media_type) {
+    switch (media_type) {
+        case MediaType::H264:
+            media_sources_[stream_name] = std::make_shared<H264MediaSource>(media_url);
+            break;
+        case MediaType::AAC:
+            media_sources_[stream_name] = std::make_shared<AACMediaSource>(media_url);
+            break;
+        default:
+            LOG_ERROR("Media type didn't support");
+            break;
+    }
 }
 
-std::string MediaSourceManager::get_media_source(const std::string& stream_name) {
+std::shared_ptr<MediaSource> MediaSourceManager::get_media_source(const std::string& stream_name) {
     auto it = media_sources_.find(stream_name);
     if (it != media_sources_.end()) {
         return it->second;
     }
-    return "";
+    return nullptr;
 }
 
 bool MediaSourceManager::has_media_source(const std::string& stream_name) {
-    auto stream_url = url_prefix_ + stream_name + url_suffix_;
-    return media_sources_.find(stream_url) != media_sources_.end();
-}
-
-void MediaSourceManager::setup_prefix(const std::string &prefix) {
-    url_prefix_ = prefix;
-}
-
-void MediaSourceManager::setup_suffix(const std::string &suffix) {
-    url_suffix_ = suffix;
+    return media_sources_.find(stream_name) != media_sources_.end();
 }

@@ -4,12 +4,12 @@
 
 #include "SessionManager.h"
 
-std::shared_ptr<Session> SessionManager::create_session(const std::string& session_id, const std::string& media_url,
+std::shared_ptr<Session> SessionManager::create_session(const std::string& session_id, const std::shared_ptr<MediaSource>& media_source,
                                                         const int server_rtp_port, const int server_rtcp_port,
                                                         const std::string& client_ip, const int client_rtp_port,
                                                         const int client_rtcp_port) {
     std::unique_lock<std::mutex> lock(sessions_mutex_);
-    auto session = std::make_shared<Session>(session_id, media_url, server_rtp_port, server_rtcp_port, client_ip, client_rtp_port, client_rtcp_port);
+    auto session = std::make_shared<Session>(session_id, media_source, server_rtp_port, server_rtcp_port, client_ip, client_rtp_port, client_rtcp_port);
     sessions_[session_id] = session;
     return session;
 }

@@ -22,7 +22,7 @@ public:
     }
 
     std::shared_ptr<Session> create_session(const std::string& session_id,
-                                            const std::string& media_url,
+                                            const std::shared_ptr<MediaSource>& media_source,
                                             const int server_rtp_port,
                                             const int server_rtcp_port,
                                             const std::string& client_ip,

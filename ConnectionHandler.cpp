@@ -130,6 +130,22 @@ std::string ConnectionHandler::generate_unique_session_id() {
     return ss.str();
 }
 
+void ConnectionHandler::parse_url(const std::string &url) {
+    std::regex rtsp_url_regex(R"((?:rtsp:\/\/)(?:([a-zA-Z0-9]+):([a-zA-Z0-9]+)@)?([a-zA-Z0-9\-\.]+)(?::(\d+))?\/(\w+))");
+    std::smatch url_match;
+    if (std::regex_search(url, url_match, rtsp_url_regex)) {
+        if (url_match.size() > 5) {
+            url_.username_ = url_match[1].str();
+            url_.password_ = url_match[2].str();
+            url_.host_ = url_match[3].str();
+            url_.port_ = url_match[4].str();
+            url_.app_ = url_match[5].str();
+        } else {
+            std::runtime_error("Parse DESCRIBE request url failed.");
+        }
+    }
+}
+
 void ConnectionHandler::handle_options(const RTSPMessage& request, RTSPMessage& response) {
     response.set_protocol(request.protocol());
     response.set_status_code(RTSPMessage::StatusCode::OK);
@@ -146,37 +162,22 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
     }
 
     // Create a media description (SDP) for the requested media resource
-    std::string request_uri = request.uri();
-    std::string username, password, host, port, stream;
-    std::regex rtsp_url_regex(R"((?:rtsp:\/\/)(?:([a-zA-Z0-9]+):([a-zA-Z0-9]+)@)?([a-zA-Z0-9\-\.]+)(?::(\d+))?\/(\w+))");
-    std::smatch url_match;
-    if (std::regex_search(request_uri, url_match, rtsp_url_regex)) {
-        if (url_match.size() > 5) {
-            username = url_match[1].str();
-            password = url_match[2].str();
-            host = url_match[3].str();
-            port = url_match[4].str();
-            stream = url_match[5].str();
-        } else {
-            std::runtime_error("Error DESCRIBE request.");
-        }
-    }
-    LOG_INFO("username: {}, password: {}, host:{}, port: {}, stream: {}", username, password, host, port, stream);
-
-    if (!MediaSourceManager::instance().has_media_source(stream)) {
+    parse_url(request.uri());
+    LOG_INFO("username: {}, password: {}, host:{}, port: {}, stream: {}", url_.username_, url_.password_, url_.host_, url_.port_, url_.app_);
+    if (!MediaSourceManager::instance().has_media_source(url_.app_)) {
         response.set_protocol(request.protocol());
         response.set_status_code(RTSPMessage::StatusCode::NotFound);
         response.set_cseq(request.cseq());
         response.set_headers("Content-Length", "0");
     } else {
         std::ostringstream  oss;
+        auto media_source = MediaSourceManager::instance().get_media_source(url_.app_);
         oss << "v=0\r\n"
-               "o=- " << time(NULL) << " 1 IN IP4 " << host << "\r\n"
+               "o=- " << time(NULL) << " 1 IN IP4 " << url_.host_ << "\r\n"
                 "t=0 0\r\n"
                 "a=control:*\r\n"
-                "m=video 0 RTP/AVP 96\r\n"
-                "a=rtpmap:96 H264/90000\r\n"
-                "a=control:stream0\r\n";
+                << media_source->get_media_sdp()
+                << "a=control:stream0\r\n";
         auto sdp = oss.str();
         // Set the response attributes
         response.set_protocol(request.protocol());
@@ -213,14 +214,14 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
     // Generate a session ID
     std::string session_id = generate_unique_session_id();
     session_id_ = session_id;
-    auto media_url = MediaSourceManager::instance().get_media_source(request.uri());
-    LOG_INFO("Request uri: {}, media source: {}", request.uri(), media_url);
-    if (media_url.empty()) {
+    auto media_source = MediaSourceManager::instance().get_media_source(url_.app_);
+    LOG_INFO("Request uri: {}", request.uri());
+    if (media_source == nullptr) {
         response.set_protocol(request.protocol());
         response.set_status_code(RTSPMessage::StatusCode::NotFound);
         response.set_cseq(request.cseq());
     } else {
-        SessionManager::instance().create_session(session_id, media_url,
+        SessionManager::instance().create_session(session_id, media_source,
                                                   server_port, server_port + 1,
                                                   client_ip_, client_rtp_port, client_rtcp_port);
         LOG_INFO("Create session: {}, {}, {}", session_id, client_rtp_port, client_rtcp_port);

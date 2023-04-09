@@ -36,7 +36,7 @@ RtpRtcpHandler::~RtpRtcpHandler() {
     close(rtp_socket_);
 }
 
-void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
+void RtpRtcpHandler::send_h264(const char* payload, size_t payload_size) {
     constexpr size_t max_payload_size = MAX_RTP_PACKET_SIZE - sizeof(RTPHeader);
     size_t start_code, nal_unit_size;
     if (payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01) {
@@ -70,7 +70,7 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
             rtp_header.extension_ = 0;
             rtp_header.csrc_count_ = 0;
             rtp_header.marker_ = offset + fragment_size == payload_size ? 1 : 0;
-            rtp_header.payload_type_ = RTPHeader::PayloadType::H264;
+            rtp_header.payload_type_ = static_cast<uint8_t>(MediaType::H264);
             rtp_header.sequence_number_ = htons(rtp_sequence_number_++);
             rtp_header.timestamp_ = htonl(timestamp_);
             rtp_header.ssrc_ = htonl(ssrc_);
@@ -105,7 +105,7 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
         rtp_header.extension_ = 0;
         rtp_header.csrc_count_ = 0;
         rtp_header.marker_ = 1;
-        rtp_header.payload_type_ = RTPHeader::PayloadType::H264;
+        rtp_header.payload_type_ = static_cast<uint8_t>(MediaType::H264);
         rtp_header.sequence_number_ = htons(rtp_sequence_number_++);
         rtp_header.timestamp_ = htonl(timestamp_);
         rtp_header.ssrc_ = htonl(ssrc_);
@@ -128,7 +128,53 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size) {
             timestamp_ += timestamp_increment_;
         }
     }
+}
 
+void RtpRtcpHandler::send_aac(const char* payload, size_t payload_size) {
+    RTPHeader rtp_header;
+    rtp_header.version_ = 2;
+    rtp_header.padding_ = 0;
+    rtp_header.extension_ = 0;
+    rtp_header.csrc_count_ = 0;
+    rtp_header.marker_ = 1;
+    rtp_header.payload_type_ = static_cast<uint8_t>(MediaType::AAC);
+    rtp_header.sequence_number_ = htons(rtp_sequence_number_++);
+    rtp_header.timestamp_ = htonl(timestamp_);
+    rtp_header.ssrc_ = htonl(ssrc_);
+
+    size_t header_size = sizeof(RTPHeader);
+    memcpy(rtp_buf_, &rtp_header, header_size);     // copy header data
+    rtp_buf_[header_size] = 0x00;
+    rtp_buf_[header_size + 1] = 0x10;
+    rtp_buf_[header_size + 2] = (payload_size & 0x1FE0) >> 5;
+    rtp_buf_[header_size + 3] = (payload_size & 0x1F) << 3;
+    memcpy(rtp_buf_ + header_size + 4, payload, payload_size);
+
+    // Send the RTP packet
+    memset(&client_addr_, 0, sizeof(client_addr_));
+    client_addr_.sin_family = AF_INET;
+    client_addr_.sin_port = htons(rtp_port_);
+    if (inet_pton(AF_INET, ip_.c_str(), &client_addr_.sin_addr) <= 0) {
+        throw std::runtime_error("RtpRtcpHandler create client udp socket failed");
+    }
+    size_t rtp_packet_size = header_size + 4 + payload_size;
+    ssize_t  ret = sendto(rtp_socket_, rtp_buf_, rtp_packet_size, 0,
+                          (struct sockaddr *)&client_addr_, sizeof(client_addr_));
+    timestamp_ += timestamp_increment_;
+}
+
+void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size, MediaType payload_type) {
+    switch (payload_type) {
+        case MediaType::H264:
+            send_h264(payload, payload_size);
+            break;
+        case MediaType::AAC:
+            send_aac(payload, payload_size);
+            break;
+        default:
+            throw std::runtime_error("Not support media type, broken.");
+            break;
+    }
 }
 
 void RtpRtcpHandler::receive_rtcp_packet() {

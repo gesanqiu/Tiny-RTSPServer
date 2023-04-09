@@ -14,7 +14,7 @@
 
 class Session {
 public:
-    Session(const std::string &session_id, const std::string &media_url, const int server_rtp_port,
+    Session(const std::string& session_id, const std::shared_ptr<MediaSource>& media_source, const int server_rtp_port,
             const int server_rtcp_port, const std::string &client_ip, const int client_rtp_port,
             const int client_rtcp_port);
 
@@ -31,8 +31,8 @@ private:
     std::string session_id_;
     bool is_active_;
     std::shared_ptr<std::thread> sender_thread_;
-    std::unique_ptr<MediaSource> media_source_;
-    std::unique_ptr<RtpRtcpHandler> rtp_rtcp_handler_;
+    std::shared_ptr<MediaSource> media_source_;
+    std::shared_ptr<RtpRtcpHandler> rtp_rtcp_handler_;
 };
 
 #endif //SESSION_H

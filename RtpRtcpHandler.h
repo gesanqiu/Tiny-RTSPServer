@@ -12,14 +12,11 @@
 #include <arpa/inet.h>
 #include <cstdint>
 #include <vector>
+#include "MediaSourceHandler.h"
 
 const size_t MAX_RTP_PACKET_SIZE = 1024;
 
 struct RTPHeader {
-    enum PayloadType : uint8_t {
-        H264 = 96,
-        AAC = 97
-    };
     // RTP header fields
     uint8_t csrc_count_ : 4;
     uint8_t padding_ : 1;
@@ -44,7 +41,7 @@ public:
                    uint32_t timestamp_increment);
     ~RtpRtcpHandler();
 
-    void send_rtp_packet(const char* payload, size_t payload_size);
+    void send_rtp_packet(const char* payload, size_t payload_size, MediaType payload_type);
     void receive_rtcp_packet();
 
 private:
@@ -61,6 +58,10 @@ private:
 
     void send_rtcp_packet();
     char rtp_buf_[MAX_RTP_PACKET_SIZE + 10];
+
+    void send_h264(const char *payload, size_t payload_size);
+
+    void send_aac(const char *payload, size_t payload_size);
 };
 
 #endif // RTP_RTCP_HANDLER_H
