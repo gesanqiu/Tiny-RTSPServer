@@ -2,7 +2,7 @@
 // Created by ricardo on 4/2/23.
 //
 
-#include "MediaStreamHandler.h"
+#include "MediaSourceHandler.h"
 #include <iostream>
 #include "Logger.h"
 
@@ -21,7 +21,7 @@ int H264MediaSource::get_next_frame() {
     bool frame_start = false;
     size_t read_bytes;
 
-    while (true) {
+    while (!h264_file_.eof()) {
         // Read the data from the H.264 file into the buffer
         h264_file_.read(frame_buf_, MAX_FRAME_SIZE);
         read_bytes = h264_file_.gcount();
@@ -38,7 +38,7 @@ int H264MediaSource::get_next_frame() {
                     // Set the file position indicator to the start of the next frame
                     // and resize the vector to remove any trailing data
                     // Every time find a H.264 frame, h264_file_ seek once
-                    h264_file_.seekg(-(read_bytes - i), std::ios_base::cur);
+                    if (!h264_file_.eof()) h264_file_.seekg(-(read_bytes - i), std::ios_base::cur);
                     // Assume all H.264 file start with a 0x000001 or 0x00000001
                     // So we just need to return where the second start code locate
                     return i;
@@ -47,13 +47,7 @@ int H264MediaSource::get_next_frame() {
 //                frame_start = true;
             }
         }
-
-        // If we reached the end of the file, break the loop
-        if (h264_file_.eof()) {
-            break;
-        }
     }
-
     return -1;
 }
 
@@ -69,7 +63,7 @@ uint32_t H264MediaSource::get_timestamp_increment() const {
     // This value depends on the frame rate of the video.
     // For example, for 30 FPS, the increment would be 90000 / 30 = 3000.
     // Adjust this value according to your specific frame rate.
-    // Assume right now 25FPS
+    // Default is 25FPS.
     return 3600;
 }
 

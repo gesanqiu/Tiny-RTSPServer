@@ -5,13 +5,13 @@
 #ifndef CONNECTION_HANDLER_H
 #define CONNECTION_HANDLER_H
 
-#include "SessionManager.h"
 #include "RtspMessage.h"
+#include "PortPool.h"
 #include <string>
 
 class ConnectionHandler {
 public:
-    explicit ConnectionHandler(int client_socket, const std::string& client_ip);
+    explicit ConnectionHandler(int client_socket, const std::string& client_ip, PortPool& port_pool);
     ~ConnectionHandler();
 
     void process();
@@ -29,6 +29,8 @@ private:
 
     int client_socket_;
     std::string  client_ip_;
+    PortPool& port_pool_;
+    std::string session_id_;
     std::string generate_unique_session_id();
 };
 

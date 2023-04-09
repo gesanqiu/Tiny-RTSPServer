@@ -11,7 +11,8 @@
 #include "RtspServer.h"
 #include "Logger.h"
 
-RTSPServer::RTSPServer(int port, size_t num_threads) : port_(port), server_fd_(-1), running_(false), thread_pool_(num_threads) {}
+RTSPServer::RTSPServer(int port, size_t num_threads) : port_(port), server_fd_(-1), running_(false), thread_pool_(num_threads),
+                                                       port_pool_(10000, 13000) {}
 
 RTSPServer::~RTSPServer() {
     stop();
@@ -45,6 +46,8 @@ void RTSPServer::initialize() {
     }
 
     LOG_INFO("RTSP Server initialized on port: " + std::to_string(port_));
+
+
 }
 
 void RTSPServer::run() {
@@ -71,7 +74,7 @@ void RTSPServer::run() {
 }
 
 void RTSPServer::handle_client(int client_fd, const std::string& client_ip) {
-    auto handler = std::make_shared<ConnectionHandler>(client_fd, client_ip);
+    auto handler = std::make_shared<ConnectionHandler>(client_fd, client_ip, port_pool_);
     {
         std::unique_lock<std::mutex> lock(connections_mutex_);
         connections_[client_fd] = handler;

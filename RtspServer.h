@@ -8,6 +8,7 @@
 
 #include "ConnectionHandler.h"
 #include "ThreadPool.h"
+#include "PortPool.h"
 #include <atomic>
 #include <map>
 #include <memory>
@@ -32,6 +33,7 @@ private:
     std::mutex connections_mutex_;
     std::map<int, std::shared_ptr<ConnectionHandler>> connections_;
     ThreadPool thread_pool_;
+    PortPool port_pool_;
 };
 
 

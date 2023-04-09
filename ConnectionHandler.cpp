@@ -3,7 +3,8 @@
 //
 
 #include "ConnectionHandler.h"
-
+#include "SessionManager.h"
+#include "MediaSourceManager.h"
 #include "Logger.h"
 #include <sys/socket.h>
 #include <unistd.h>
@@ -13,11 +14,15 @@
 #include <sstream>
 #include <iomanip>
 
-ConnectionHandler::ConnectionHandler(int client_socket, const std::string& client_ip)
-        : client_socket_(client_socket), client_ip_(client_ip) {
+ConnectionHandler::ConnectionHandler(int client_socket, const std::string& client_ip, PortPool& port_pool)
+        : client_socket_(client_socket), client_ip_(client_ip), port_pool_(port_pool) {
 }
 
 ConnectionHandler::~ConnectionHandler() {
+    if (!session_id_.empty()) {
+        SessionManager::instance().terminate_session(session_id_);
+    }
+
     close(client_socket_);
 }
 
@@ -140,40 +145,47 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
         return;
     }
 
-    // 最终实现时根据request_uri_借助ResourceManager完成鉴权和查找流的工作，sdp也由RTSPStream对象自行维护
     // Create a media description (SDP) for the requested media resource
-    auto request_uri = request.uri();
-    std::string username, password, host, port;
-    std::regex rtsp_url_regex("rtsp://(?:([^:]+):([^@]+)@)?((?:[0-9a-zA-Z.-]+)|(?:\\d{1,3}(?:\\.\\d{1,3}){3}))(?::(\\d+))?.*");
+    std::string request_uri = request.uri();
+    std::string username, password, host, port, stream;
+    std::regex rtsp_url_regex(R"((?:rtsp:\/\/)(?:([a-zA-Z0-9]+):([a-zA-Z0-9]+)@)?([a-zA-Z0-9\-\.]+)(?::(\d+))?\/(\w+))");
     std::smatch url_match;
     if (std::regex_search(request_uri, url_match, rtsp_url_regex)) {
-        if (url_match.size() > 4) {
+        if (url_match.size() > 5) {
             username = url_match[1].str();
             password = url_match[2].str();
             host = url_match[3].str();
             port = url_match[4].str();
+            stream = url_match[5].str();
         } else {
             std::runtime_error("Error DESCRIBE request.");
         }
     }
-    LOG_INFO("username: {}, password: {}, host:{}, port: {}", username, password, host, port);
+    LOG_INFO("username: {}, password: {}, host:{}, port: {}, stream: {}", username, password, host, port, stream);
 
-    std::ostringstream  oss;
-    oss << "v=0\r\n"
-           "o=- 9" << time(NULL) << " 1 IN IP4 " << host << "\r\n"
-           "t=0 0\r\n"
-           "a=control:*\r\n"
-           "m=video 0 RTP/AVP 96\r\n"
-           "a=rtpmap:96 H264/90000\r\n"
-           "a=control:track0\r\n";
-    auto sdp = oss.str();
-    // Set the response attributes
-    response.set_protocol(request.protocol());
-    response.set_status_code(RTSPMessage::StatusCode::OK);
-    response.set_cseq(request.cseq());
-    response.set_headers("Content-Type", "application/sdp");
-    response.set_headers("Content-Length", std::to_string(sdp.size()));
-    response.set_body(sdp);
+    if (!MediaSourceManager::instance().has_media_source(stream)) {
+        response.set_protocol(request.protocol());
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+        response.set_headers("Content-Length", "0");
+    } else {
+        std::ostringstream  oss;
+        oss << "v=0\r\n"
+               "o=- " << time(NULL) << " 1 IN IP4 " << host << "\r\n"
+                "t=0 0\r\n"
+                "a=control:*\r\n"
+                "m=video 0 RTP/AVP 96\r\n"
+                "a=rtpmap:96 H264/90000\r\n"
+                "a=control:stream0\r\n";
+        auto sdp = oss.str();
+        // Set the response attributes
+        response.set_protocol(request.protocol());
+        response.set_status_code(RTSPMessage::StatusCode::OK);
+        response.set_cseq(request.cseq());
+        response.set_headers("Content-Type", "application/sdp");
+        response.set_headers("Content-Length", std::to_string(sdp.size()));
+        response.set_body(sdp);
+    }
 }
 
 void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& response) {
@@ -194,22 +206,31 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
         }
     }
 
-    // Generate server ports and SSRC
-    std::string server_port_range = "9000-9001"; // You can generate server ports dynamically
+    // Generate server ports
+    auto server_port = port_pool_.allocate_port_pair();
+    std::string server_port_range = std::to_string(server_port) + "-" + std::to_string(server_port + 1);
 
     // Generate a session ID
     std::string session_id = generate_unique_session_id();
-    // 后续实现时，MediaSource应该从MediaSourceManager里取出并传递，来创建Session对象
-    SessionManager::instance().create_session(session_id, request.uri(),
-                                              9000, 9001,
-                                              client_ip_, client_rtp_port, client_rtcp_port);
-    LOG_INFO("Create session: {}, {}, {}", session_id, client_rtp_port, client_rtcp_port);
-    // Build the response
-    response.set_protocol(request.protocol());
-    response.set_status_code(RTSPMessage::StatusCode::OK);
-    response.set_cseq(request.cseq());
-    response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range);
-    response.set_headers("Session", session_id);
+    session_id_ = session_id;
+    auto media_url = MediaSourceManager::instance().get_media_source(request.uri());
+    LOG_INFO("Request uri: {}, media source: {}", request.uri(), media_url);
+    if (media_url.empty()) {
+        response.set_protocol(request.protocol());
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+    } else {
+        SessionManager::instance().create_session(session_id, media_url,
+                                                  server_port, server_port + 1,
+                                                  client_ip_, client_rtp_port, client_rtcp_port);
+        LOG_INFO("Create session: {}, {}, {}", session_id, client_rtp_port, client_rtcp_port);
+        // Build the response
+        response.set_protocol(request.protocol());
+        response.set_status_code(RTSPMessage::StatusCode::OK);
+        response.set_cseq(request.cseq());
+        response.set_headers("Transport", "RTP/AVP;unicast;client_port=" + client_port_range + ";server_port=" + server_port_range);
+        response.set_headers("Session", session_id);
+    }
 }
 
 void ConnectionHandler::handle_play(const RTSPMessage& request, RTSPMessage& response) {

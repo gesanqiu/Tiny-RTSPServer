@@ -7,8 +7,9 @@
 
 #include <string>
 #include <memory>
+#include <thread>
 
-#include "MediaStreamHandler.h"
+#include "MediaSourceHandler.h"
 #include "RtpRtcpHandler.h"
 
 class Session {
@@ -29,6 +30,7 @@ public:
 private:
     std::string session_id_;
     bool is_active_;
+    std::shared_ptr<std::thread> sender_thread_;
     std::unique_ptr<MediaSource> media_source_;
     std::unique_ptr<RtpRtcpHandler> rtp_rtcp_handler_;
 };
