@@ -21,13 +21,7 @@ public:
         return instance;
     }
 
-    std::shared_ptr<Session> create_session(const std::string& session_id,
-                                            const std::shared_ptr<MediaSource>& media_source,
-                                            const int server_rtp_port,
-                                            const int server_rtcp_port,
-                                            const std::string& client_ip,
-                                            const int client_rtp_port,
-                                            const int client_rtcp_port);
+    std::shared_ptr<Session> create_session(const std::string& session_id);
     std::shared_ptr<Session> get_session(const std::string& session_id);
     void terminate_session(const std::string& session_id);
     bool session_exists(const std::string& session_id);

@@ -6,15 +6,15 @@
 #include <iostream>
 #include "Logger.h"
 
-H264MediaSource::H264MediaSource(const std::string& url) : url_(url) {}
+H264MediaTrack::H264MediaTrack(const std::string& track_name, const std::string& url) : track_name_(track_name), url_(url) {}
 
-H264MediaSource::~H264MediaSource() {
+H264MediaTrack::~H264MediaTrack() {
     if (h264_file_.is_open()) {
         h264_file_.close();
     }
 }
 
-int H264MediaSource::get_next_frame() {
+int H264MediaTrack::get_next_frame() {
     bool frame_start = false;
     size_t read_bytes;
     while (!h264_file_.eof()) {
@@ -47,19 +47,19 @@ int H264MediaSource::get_next_frame() {
     return -1;
 }
 
-std::string H264MediaSource::get_codec_name() const {
+std::string H264MediaTrack::get_codec_name() const {
     return "H264";
 }
 
-MediaType H264MediaSource::get_media_type() const {
+MediaType H264MediaTrack::get_media_type() const {
     return MediaType::H264;
 }
 
-uint8_t H264MediaSource::get_payload_type() const {
+uint8_t H264MediaTrack::get_payload_type() const {
     return 96; // H.264 payload type is often set to 96 in dynamic range (96-127)
 }
 
-uint32_t H264MediaSource::get_timestamp_increment() const {
+uint32_t H264MediaTrack::get_timestamp_increment() const {
     // This value depends on the frame rate of the video.
     // For example, for 30 FPS, the increment would be 90000 / 30 = 3000.
     // Adjust this value according to your specific frame rate.
@@ -67,43 +67,43 @@ uint32_t H264MediaSource::get_timestamp_increment() const {
     return 3600;
 }
 
-const char* H264MediaSource::get_frame_buf() const {
+const char* H264MediaTrack::get_frame_buf() const {
     return frame_buf_;
 }
 
-std::string H264MediaSource::get_media_sdp() const {
+std::string H264MediaTrack::get_media_sdp() const {
     return "m=video 0 RTP/AVP 96\r\n"
            "a=rtpmap:96 H264/90000\r\n"
-           "a=control:stream0\r\n";
+           "a=control:" + track_name_ + "\r\n";
 }
 
-int H264MediaSource::get_media_fps() const {
+int H264MediaTrack::get_media_fps() const {
     return 25;
 }
 
 // media_stream_handler.cpp
-void H264MediaSource::open() {
+void H264MediaTrack::open() {
     h264_file_.open(url_, std::ios::binary);
     if (!h264_file_.is_open()) {
         throw std::runtime_error("Failed to open H.264 file: " + url_);
     }
 }
 
-void H264MediaSource::close() {
+void H264MediaTrack::close() {
     if (h264_file_.is_open()) {
         h264_file_.close();
     }
 }
 
-AACMediaSource::AACMediaSource(const std::string &url) : url_(url) {}
+AACMediaTrack::AACMediaTrack(const std::string& track_name, const std::string &url) : track_name_(track_name), url_(url) {}
 
-AACMediaSource::~AACMediaSource() {
+AACMediaTrack::~AACMediaTrack() {
     if (aac_file_.is_open()) {
         aac_file_.close();
     }
 }
 
-int AACMediaSource::get_next_frame() {
+int AACMediaTrack::get_next_frame() {
     constexpr size_t adts_header_size = 7;
     uint8_t adts_header[adts_header_size];
     aac_file_.read(reinterpret_cast<char *>(adts_header), adts_header_size);
@@ -120,46 +120,87 @@ int AACMediaSource::get_next_frame() {
     return frame_size;
 }
 
-std::string AACMediaSource::get_codec_name() const {
+std::string AACMediaTrack::get_codec_name() const {
     return "AAC";
 }
 
-MediaType AACMediaSource::get_media_type() const {
+MediaType AACMediaTrack::get_media_type() const {
     return MediaType::AAC;
 }
 
-uint8_t AACMediaSource::get_payload_type() const {
+uint8_t AACMediaTrack::get_payload_type() const {
     return 97;
 }
 
-uint32_t AACMediaSource::get_timestamp_increment() const {
+uint32_t AACMediaTrack::get_timestamp_increment() const {
     return 1025;
 }
 
-const char* AACMediaSource::get_frame_buf() const {
+const char* AACMediaTrack::get_frame_buf() const {
     return frame_buf_;
 }
 
-std::string AACMediaSource::get_media_sdp() const {
+std::string AACMediaTrack::get_media_sdp() const {
     return "m=audio 0 RTP/AVP 97\r\n"
            "a=rtpmap:97 mpeg4-generic/44100/2\r\n"
-           "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1210;\r\n";
+           "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1210;\r\n"
+           "a=control:" + track_name_ + "\r\n";
 }
 
-int AACMediaSource::get_media_fps() const {
+int AACMediaTrack::get_media_fps() const {
     return 43;
 }
 
 // media_stream_handler.cpp
-void AACMediaSource::open() {
+void AACMediaTrack::open() {
     aac_file_.open(url_, std::ios::binary);
     if (!aac_file_.is_open()) {
         throw std::runtime_error("Failed to open H.264 file: " + url_);
     }
 }
 
-void AACMediaSource::close() {
+void AACMediaTrack::close() {
     if (aac_file_.is_open()) {
         aac_file_.close();
     }
+}
+
+MediaSource::MediaSource(const std::string &stream_name) : stream_name_(stream_name) {}
+
+MediaSource::~MediaSource() {
+
+}
+
+bool MediaSource::has_media_track(const std::string &track_name) {
+    return media_tracks_.find(track_name) != media_tracks_.end();
+}
+
+void MediaSource::add_media_track(const std::string &track_name, const std::string &media_url, const MediaType media_type) {
+    switch (media_type) {
+        case MediaType::H264:
+            media_tracks_[track_name] = std::make_shared<H264MediaTrack>(track_name, media_url);
+            break;
+        case MediaType::AAC:
+            media_tracks_[track_name] = std::make_shared<AACMediaTrack>(track_name, media_url);
+            break;
+        default:
+            LOG_ERROR("Media type didn't support");
+            break;
+    }
+}
+
+std::shared_ptr<MediaTrack> MediaSource::get_media_track(const std::string &track_name) {
+    auto it = media_tracks_.find(track_name);
+    if (it != media_tracks_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+std::string MediaSource::get_media_sdp() {
+    std::string media_sdp;
+    for (auto& [k, v] : media_tracks_) {
+        media_sdp += v->get_media_sdp();
+    }
+    return media_sdp;
 }

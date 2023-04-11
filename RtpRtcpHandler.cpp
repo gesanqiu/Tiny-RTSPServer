@@ -22,6 +22,11 @@ RtpRtcpHandler::RtpRtcpHandler(const int server_rtp_port, const int server_rtcp_
         throw std::runtime_error("RtpRtcpHandler create server socket failed");
     }
 
+    int opt = 1;
+    if (setsockopt(rtp_socket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        throw std::runtime_error("Error setting rtp_socket_ options");
+    }
+
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(server_rtp_port);

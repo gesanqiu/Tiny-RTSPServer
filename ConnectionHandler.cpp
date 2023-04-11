@@ -131,19 +131,22 @@ std::string ConnectionHandler::generate_unique_session_id() {
 }
 
 void ConnectionHandler::parse_url(const std::string &url) {
-    std::regex rtsp_url_regex(R"((?:rtsp:\/\/)(?:([a-zA-Z0-9]+):([a-zA-Z0-9]+)@)?([a-zA-Z0-9\-\.]+)(?::(\d+))?\/(\w+))");
+    std::regex rtsp_url_regex(R"((rtsp)(?::\/\/(?:([^:]*):([^@]*)@)?([^:]*):(\d+)\/([^\/]*)(?:\/([^\/]*))?))");
     std::smatch url_match;
     if (std::regex_search(url, url_match, rtsp_url_regex)) {
-        if (url_match.size() > 5) {
-            url_.username_ = url_match[1].str();
-            url_.password_ = url_match[2].str();
-            url_.host_ = url_match[3].str();
-            url_.port_ = url_match[4].str();
-            url_.app_ = url_match[5].str();
-        } else {
-            std::runtime_error("Parse DESCRIBE request url failed.");
-        }
+        url_.protocol_ = url_match[1].str();
+        url_.username_ = url_match[2].str();
+        url_.password_ = url_match[3].str();
+        url_.host_ = url_match[4].str();
+        url_.port_ = url_match[5].str();
+        url_.app_ = url_match[6].str();
+        url_.track_ = url_match[7].str();
+    } else {
+        std::runtime_error("Parse DESCRIBE request url failed.");
     }
+    LOG_INFO("username: {}, password: {}, host: {}, port: {}, stream: {}, track: {}",
+             url_.username_, url_.password_, url_.host_, url_.port_, url_.app_, url_.track_);
+
 }
 
 void ConnectionHandler::handle_options(const RTSPMessage& request, RTSPMessage& response) {
@@ -154,6 +157,7 @@ void ConnectionHandler::handle_options(const RTSPMessage& request, RTSPMessage& 
 }
 
 void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage& response) {
+    parse_url(request.uri());
     // Check the Accept header and make sure the client accepts SDP format
     if (request.get_header_value("Accept") != "application/sdp") {
         response.set_status_code(RTSPMessage::StatusCode::NotAcceptable);
@@ -162,8 +166,6 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
     }
 
     // Create a media description (SDP) for the requested media resource
-    parse_url(request.uri());
-    LOG_INFO("username: {}, password: {}, host:{}, port: {}, stream: {}", url_.username_, url_.password_, url_.host_, url_.port_, url_.app_);
     if (!MediaSourceManager::instance().has_media_source(url_.app_)) {
         response.set_protocol(request.protocol());
         response.set_status_code(RTSPMessage::StatusCode::NotFound);
@@ -176,8 +178,7 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
                "o=- " << time(NULL) << " 1 IN IP4 " << url_.host_ << "\r\n"
                 "t=0 0\r\n"
                 "a=control:*\r\n"
-                << media_source->get_media_sdp()
-                << "a=control:stream0\r\n";
+                << media_source->get_media_sdp();
         auto sdp = oss.str();
         // Set the response attributes
         response.set_protocol(request.protocol());
@@ -190,6 +191,7 @@ void ConnectionHandler::handle_describe(const RTSPMessage& request, RTSPMessage&
 }
 
 void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& response) {
+    parse_url(request.uri());
     // Parse transport and client ports from the request
     auto transport = request.get_header_value("Transport");
     std::string client_port_range;
@@ -212,18 +214,32 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
     std::string server_port_range = std::to_string(server_port) + "-" + std::to_string(server_port + 1);
 
     // Generate a session ID
-    std::string session_id = generate_unique_session_id();
-    session_id_ = session_id;
+    std::string session_id = request.get_header_value("Session");
+    if (session_id.empty()) {
+        session_id = generate_unique_session_id();
+        session_id_ = session_id;
+    }
+
     auto media_source = MediaSourceManager::instance().get_media_source(url_.app_);
-    LOG_INFO("Request uri: {}", request.uri());
-    if (media_source == nullptr) {
+    auto media_track = media_source->get_media_track(url_.track_);
+
+    if (media_source == nullptr || media_track == nullptr) {
         response.set_protocol(request.protocol());
         response.set_status_code(RTSPMessage::StatusCode::NotFound);
         response.set_cseq(request.cseq());
     } else {
-        SessionManager::instance().create_session(session_id, media_source,
-                                                  server_port, server_port + 1,
-                                                  client_ip_, client_rtp_port, client_rtcp_port);
+        if (!SessionManager::instance().session_exists(session_id)) {
+            auto session = SessionManager::instance().create_session(session_id);
+            session->add_media_track(url_.track_, media_track,
+                                    server_port, server_port + 1,
+                                    client_ip_, client_rtp_port, client_rtcp_port);
+        } else {
+            auto session = SessionManager::instance().get_session(session_id);
+            session->add_media_track(url_.track_, media_track,
+                                    server_port, server_port + 1,
+                                    client_ip_, client_rtp_port, client_rtcp_port);
+        }
+
         LOG_INFO("Create session: {}, {}, {}", session_id, client_rtp_port, client_rtcp_port);
         // Build the response
         response.set_protocol(request.protocol());

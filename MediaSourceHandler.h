@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <string>
 #include <fstream>
+#include <unordered_map>
+#include <memory>
 
 const int MAX_FRAME_SIZE = 512 * 1024;
 
@@ -18,9 +20,9 @@ enum class MediaType : uint8_t {
     AAC = 97
 };
 
-class MediaSource {
+class MediaTrack {
 public:
-    virtual ~MediaSource() = default;
+    virtual ~MediaTrack() = default;
 
     // Get the next media data/frame to be sent to the client
     virtual int get_next_frame() = 0;
@@ -46,10 +48,10 @@ public:
     virtual void close() = 0;
 };
 
-class H264MediaSource : public MediaSource {
+class H264MediaTrack : public MediaTrack {
 public:
-    H264MediaSource(const std::string& url);
-    ~H264MediaSource();
+    H264MediaTrack(const std::string& track_name, const std::string& url);
+    ~H264MediaTrack();
 
     int get_next_frame() override;
     std::string get_codec_name() const override;
@@ -63,16 +65,16 @@ public:
     void close() override;
 
 private:
-    // You can add private member variables and methods for H.264 encoding and frame generation
     std::string url_;
+    std::string track_name_;
     std::ifstream h264_file_;
     char frame_buf_[MAX_FRAME_SIZE + 10];
 };
 
-class AACMediaSource : public MediaSource {
+class AACMediaTrack : public MediaTrack {
 public:
-    AACMediaSource(const std::string& url);
-    ~AACMediaSource();
+    AACMediaTrack(const std::string& track_name, const std::string& url);
+    ~AACMediaTrack();
 
     int get_next_frame() override;
     std::string get_codec_name() const override;
@@ -86,10 +88,24 @@ public:
     void close() override;
 
 private:
-    // You can add private member variables and methods for H.264 encoding and frame generation
     std::string url_;
+    std::string track_name_;
     std::ifstream aac_file_;
     char frame_buf_[MAX_FRAME_SIZE + 10];
+};
+
+class MediaSource {
+public:
+    MediaSource(const std::string& stream_name);
+    ~MediaSource();
+
+    bool has_media_track(const std::string& track_name);
+    void add_media_track(const std::string& track_name, const std::string& media_url, const MediaType media_type);
+    std::shared_ptr<MediaTrack> get_media_track(const std::string& track_name);
+    std::string get_media_sdp();
+private:
+    std::string stream_name_;
+    std::unordered_map<std::string, std::shared_ptr<MediaTrack>> media_tracks_;
 };
 
 

@@ -17,7 +17,7 @@ public:
         return instance;
     }
 
-    void add_media_source(const std::string& stream_name, const std::string& media_source, const MediaType media_type);
+    void add_media_source(const std::string& stream_name);
     std::shared_ptr<MediaSource> get_media_source(const std::string& stream_name);
     bool has_media_source(const std::string& stream_name);
 

@@ -10,11 +10,13 @@
 #include <string>
 
 struct RTSPUrl {
+    std::string protocol_;
     std::string username_;
     std::string password_;
     std::string host_;
     std::string port_;
     std::string app_;
+    std::string track_;
 };
 
 class ConnectionHandler {

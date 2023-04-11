@@ -12,7 +12,7 @@
 #include "Logger.h"
 
 RTSPServer::RTSPServer(int port, size_t num_threads) : port_(port), server_fd_(-1), running_(false), thread_pool_(num_threads),
-                                                       port_pool_(10000, 13000) {}
+                                                       port_pool_(15000, 16000) {}
 
 RTSPServer::~RTSPServer() {
     stop();
