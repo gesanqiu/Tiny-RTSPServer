@@ -34,3 +34,7 @@
 # Build
 cmake-build-debug/
 build/
+
+# IDE Config
+.vscode/
+.idea/
