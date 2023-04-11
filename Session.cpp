@@ -20,11 +20,6 @@ Session::Session(const std::string& session_id, const std::shared_ptr<MediaSourc
 Session::~Session() {
     // Clean up resources, such as stopping the stream if still active
     stop();
-    if (sender_thread_ && sender_thread_->joinable()) {
-        sender_thread_->join();
-        sender_thread_.reset();
-    }
-    sleep(1);
     if (media_source_) media_source_.reset();
 }
 
@@ -55,8 +50,6 @@ bool Session::start() {
             }
             LOG_INFO("Session thread stopped.");
         }));
-
-        sender_thread_->detach();
     }
     return true; // Return true if successful, false otherwise
 }
@@ -73,7 +66,6 @@ bool Session::stop() {
         sender_thread_->join();
         sender_thread_.reset();
     }
-    sleep(1);
     if (media_source_) media_source_->close();
     LOG_INFO("session stopped: {}", session_id_);
     return true; // Return true if successful, false otherwise
