@@ -8,10 +8,14 @@
 
 #include <vector>
 #include <cstdint>
-#include <string>
+#include <string.h>
 #include <fstream>
 #include <unordered_map>
 #include <memory>
+#include <unordered_set>
+#include <thread>
+
+#include "CircularQueue.h"
 
 const int MAX_FRAME_SIZE = 512 * 1024;
 
@@ -20,12 +24,28 @@ enum class MediaType : uint8_t {
     AAC = 97
 };
 
+struct FrameData {
+    FrameData(const char* source, size_t size) {
+        is_allocated_ = true;
+        data_ = new char[size];
+        memcpy(data_, source, size);
+        size_ = size;
+    }
+    ~FrameData() {
+        if (is_allocated_) delete data_;
+    }
+
+    bool is_allocated_;
+    char* data_;
+    size_t size_;
+};
+
 class MediaTrack {
 public:
     virtual ~MediaTrack() = default;
 
     // Get the next media data/frame to be sent to the client
-    virtual int get_next_frame() = 0;
+    virtual std::shared_ptr<FrameData> get_next_frame(const std::string& session_id) = 0;
 
     // Get the codec name for the media source (e.g., "H264", "AAC", etc.)
     virtual std::string get_codec_name() const = 0;
@@ -46,6 +66,12 @@ public:
 
     virtual void open() = 0;
     virtual void close() = 0;
+
+    virtual void start() = 0;
+    virtual void stop() = 0;
+
+    virtual void register_session(const std::string &session_id) = 0;
+    virtual void unregister_session(const std::string &session_id) = 0;
 };
 
 class H264MediaTrack : public MediaTrack {
@@ -53,7 +79,7 @@ public:
     H264MediaTrack(const std::string& track_name, const std::string& url);
     ~H264MediaTrack();
 
-    int get_next_frame() override;
+    std::shared_ptr<FrameData> get_next_frame(const std::string& session_id) override;
     std::string get_codec_name() const override;
     uint8_t get_payload_type() const override;
     uint32_t get_timestamp_increment() const override;
@@ -63,12 +89,23 @@ public:
     int get_media_fps() const override;
     void open() override;
     void close() override;
+    void start() override;
+    void stop() override;
+    void register_session(const std::string &session_id) override;
+    void unregister_session(const std::string &session_id) override;
 
 private:
     std::string url_;
     std::string track_name_;
     std::ifstream h264_file_;
     char frame_buf_[MAX_FRAME_SIZE + 10];
+    std::shared_ptr<CircularQueue<std::shared_ptr<FrameData>>> frame_queue_;
+    std::unordered_set<std::string> consumers_;
+    bool is_active_;
+    std::shared_ptr<std::thread> produce_thread_;
+
+    int read_next_frame();
+    void run_producer();
 };
 
 class AACMediaTrack : public MediaTrack {
@@ -76,7 +113,7 @@ public:
     AACMediaTrack(const std::string& track_name, const std::string& url);
     ~AACMediaTrack();
 
-    int get_next_frame() override;
+    std::shared_ptr<FrameData> get_next_frame(const std::string& session_id) override;
     std::string get_codec_name() const override;
     uint8_t get_payload_type() const override;
     uint32_t get_timestamp_increment() const override;
@@ -86,12 +123,22 @@ public:
     int get_media_fps() const override;
     void open() override;
     void close() override;
+    void start() override;
+    void stop() override;
+    void register_session(const std::string &session_id) override;
+    void unregister_session(const std::string &session_id) override;
 
 private:
     std::string url_;
     std::string track_name_;
     std::ifstream aac_file_;
     char frame_buf_[MAX_FRAME_SIZE + 10];
+    std::shared_ptr<CircularQueue<std::shared_ptr<FrameData>>> frame_queue_;
+    bool is_active_;
+    std::shared_ptr<std::thread> produce_thread_;
+
+    int read_next_frame();
+    void run_producer();
 };
 
 class MediaSource {

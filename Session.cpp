@@ -14,7 +14,10 @@ Session::~Session() {
     stop();
     for (auto& [k, v] : session_handlers_) {
         if (v) {
-            if (v->media_track_) v->media_track_.reset();
+            if (v->media_track_) {
+                v->media_track_->unregister_session(session_id_);
+                v->media_track_.reset();
+            }
             if (v->rtp_rtcp_handler_) v->rtp_rtcp_handler_.reset();
             v.reset();
         }
@@ -32,7 +35,7 @@ void Session::add_media_track(const std::string& track_name, const std::shared_p
     auto session_handler = std::make_shared<SessionHandler>();
     session_handler->track_name_ = track_name;
     session_handler->media_track_ = media_track;
-    session_handler->media_track_->open();
+    session_handler->media_track_->register_session(session_id_);
     auto rtp_rtcp_handler = std::make_shared<RtpRtcpHandler>(server_rtp_port, server_rtcp_port,
                                                          client_ip, client_rtp_port, client_rtcp_port,
                                                          media_track->get_timestamp_increment());
@@ -46,16 +49,17 @@ bool Session::start() {
         if (!v->is_active_) {
             LOG_INFO("Track: {} started.", k);
             v->is_active_  = true;
+            v->media_track_->start();   // 因为是从文件里读，所以需要手动start和stop，正常处理一个流的时候应该假设始终能product
             v->sender_thread_.reset(new std::thread([this, &v]() {
                 while (v->is_active_) {
                     if (v->media_track_) {
-                        int frame_size = v->media_track_->get_next_frame();
-                        if (frame_size <= 0) {
+                        auto frame = v->media_track_->get_next_frame(this->session_id_);
+                        if (nullptr == frame) {
                             LOG_INFO("Read to the end, exit.");
                             break;
                         }
 
-                        v->rtp_rtcp_handler_->send_rtp_packet(v->media_track_->get_frame_buf(), frame_size, v->media_track_->get_media_type());
+                        v->rtp_rtcp_handler_->send_rtp_packet(frame->data_, frame->size_, v->media_track_->get_media_type());
 
                         // Sleep for a duration based on the frame rate
                         std::this_thread::sleep_for(std::chrono::microseconds(1000000 / v->media_track_->get_media_fps()));
@@ -88,7 +92,7 @@ bool Session::stop() {
                 v->sender_thread_->join();
                 v->sender_thread_.reset();
             }
-            if (v->media_track_) v->media_track_->close();
+//            if (v->media_track_) v->media_track_->stop();
         }
     }
     LOG_INFO("session stopped: {}", session_id_);

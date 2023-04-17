@@ -142,7 +142,7 @@ void ConnectionHandler::parse_url(const std::string &url) {
         url_.app_ = url_match[6].str();
         url_.track_ = url_match[7].str();
     } else {
-        std::runtime_error("Parse DESCRIBE request url failed.");
+        throw std::runtime_error("Parse DESCRIBE request url failed.");
     }
     LOG_INFO("username: {}, password: {}, host: {}, port: {}, stream: {}, track: {}",
              url_.username_, url_.password_, url_.host_, url_.port_, url_.app_, url_.track_);
