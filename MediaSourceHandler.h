@@ -104,7 +104,7 @@ private:
     bool is_active_;
     std::shared_ptr<std::thread> produce_thread_;
 
-    int read_next_frame();
+    ssize_t read_next_frame();
     void run_producer();
 };
 
@@ -137,7 +137,7 @@ private:
     bool is_active_;
     std::shared_ptr<std::thread> produce_thread_;
 
-    int read_next_frame();
+    ssize_t read_next_frame();
     void run_producer();
 };
 

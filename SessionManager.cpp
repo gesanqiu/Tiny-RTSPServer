@@ -3,6 +3,7 @@
 //
 
 #include "SessionManager.h"
+#include "Logger.h"
 
 std::shared_ptr<Session> SessionManager::create_session(const std::string& session_id) {
     std::unique_lock<std::mutex> lock(sessions_mutex_);
@@ -27,9 +28,11 @@ bool SessionManager::session_exists(const std::string& session_id) {
 
 void SessionManager::terminate_session(const std::string& session_id) {
     std::unique_lock<std::mutex> lock(sessions_mutex_);
+    LOG_DEBUG("Session: {} start terminate.", session_id);
     auto it = sessions_.find(session_id);
     if (it != sessions_.end()) {
         it->second->stop(); // Stop the session before erasing it
         sessions_.erase(it);
     }
+    LOG_DEBUG("Session: {} terminated.", session_id);
 }

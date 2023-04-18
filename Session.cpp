@@ -50,6 +50,7 @@ bool Session::start() {
             LOG_INFO("Track: {} started.", k);
             v->is_active_  = true;
             v->media_track_->start();   // 因为是从文件里读，所以需要手动start和stop，正常处理一个流的时候应该假设始终能product
+            v->rtp_rtcp_handler_->start();
             v->sender_thread_.reset(new std::thread([this, &v]() {
                 while (v->is_active_) {
                     if (v->media_track_) {
@@ -69,6 +70,7 @@ bool Session::start() {
                 }
                 LOG_INFO("Session thread stopped.");
             }));
+            v->rtp_rtcp_handler_->stop();
         }
     }
     return true; // Return true if successful, false otherwise
@@ -92,7 +94,6 @@ bool Session::stop() {
                 v->sender_thread_->join();
                 v->sender_thread_.reset();
             }
-//            if (v->media_track_) v->media_track_->stop();
         }
     }
     LOG_INFO("session stopped: {}", session_id_);

@@ -220,10 +220,11 @@ void ConnectionHandler::handle_setup(const RTSPMessage& request, RTSPMessage& re
         session_id_ = session_id;
     }
 
-    auto media_source = MediaSourceManager::instance().get_media_source(url_.app_);
-    auto media_track = media_source->get_media_track(url_.track_);
-
-    if (media_source == nullptr || media_track == nullptr) {
+    if (auto media_source = MediaSourceManager::instance().get_media_source(url_.app_); media_source == nullptr) {
+        response.set_protocol(request.protocol());
+        response.set_status_code(RTSPMessage::StatusCode::NotFound);
+        response.set_cseq(request.cseq());
+    } else if (auto media_track = media_source->get_media_track(url_.track_); media_track == nullptr) {
         response.set_protocol(request.protocol());
         response.set_status_code(RTSPMessage::StatusCode::NotFound);
         response.set_cseq(request.cseq());

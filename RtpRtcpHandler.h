@@ -75,6 +75,8 @@ public:
 
     void send_rtp_packet(const char* payload, size_t payload_size, MediaType payload_type);
 
+    void stop();
+    void start();
 private:
     int rtp_socket_;
     int rtcp_socket_;
@@ -101,7 +103,7 @@ private:
     std::unordered_map<uint32_t, RTCPReportBlock> rtcp_report_blocks_;
     uint32_t total_payload_size_;
     uint32_t total_rtp_packet_sent_;
-    bool parse_rtcp_packet(const char *buffer, int received_bytes, RTCPReceiverReport &rr);
+    bool parse_rtcp_packet(const char *buffer, ssize_t received_bytes, RTCPReceiverReport &rr);
 };
 
 #endif // RTP_RTCP_HANDLER_H

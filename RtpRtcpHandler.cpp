@@ -48,33 +48,45 @@ RtpRtcpHandler::RtpRtcpHandler(const int server_rtp_port, const int server_rtcp_
         throw std::runtime_error("Error setting rtp_socket_ options");
     }
 
+    struct timeval tv;
+    tv.tv_sec  = 1;     // 1s超时
+    tv.tv_usec = 0;
+    if (setsockopt(rtcp_socket_, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(struct timeval)) < 0) {
+        throw std::runtime_error("Error setting rtcp_socket_ timeout options");
+    }
+
     struct sockaddr_in rtcp_addr;
     rtcp_addr.sin_family = AF_INET;
     rtcp_addr.sin_port = htons(server_rtcp_port);
     rtcp_addr.sin_addr.s_addr = inet_addr("0.0.0.0");
 
     if (bind(rtcp_socket_, (struct sockaddr*)&rtcp_addr, sizeof(struct sockaddr)) < 0) {
-        throw std::runtime_error("Bind rtp socket with server failed.");
+        throw std::runtime_error("Bind rtcp socket with server failed.");
     }
+}
 
+RtpRtcpHandler::~RtpRtcpHandler() {
+    stop();
+
+    if (rtp_socket_ >= 0) close(rtp_socket_);
+    if (rtcp_socket_ >= 0) close(rtcp_socket_);
+}
+
+void RtpRtcpHandler::start() {
     rtcp_send_thread_.reset(new std::thread(&RtpRtcpHandler::send_rtcp_packet, this));
     rtcp_receive_thread_.reset(new std::thread(&RtpRtcpHandler::receive_rtcp_packet, this));
 }
 
-RtpRtcpHandler::~RtpRtcpHandler() {
+void RtpRtcpHandler::stop() {
     is_running_ = false;
     if (rtcp_send_thread_ && rtcp_send_thread_->joinable()) {
         rtcp_send_thread_->join();
         rtcp_send_thread_.reset();
     }
-
     if (rtcp_receive_thread_ && rtcp_receive_thread_->joinable()) {
         rtcp_receive_thread_->join();
         rtcp_receive_thread_.reset();
     }
-
-    if (rtp_socket_ >= 0) close(rtp_socket_);
-    if (rtcp_socket_ >= 0) close(rtcp_socket_);
 }
 
 void RtpRtcpHandler::send_h264(const char* payload, size_t payload_size) {
@@ -222,7 +234,7 @@ void RtpRtcpHandler::send_rtp_packet(const char* payload, size_t payload_size, M
     total_payload_size_ += payload_size;
 }
 
-bool RtpRtcpHandler::parse_rtcp_packet(const char* buffer, int received_bytes, RTCPReceiverReport& rr) {
+bool RtpRtcpHandler::parse_rtcp_packet(const char* buffer, ssize_t received_bytes, RTCPReceiverReport& rr) {
     if (received_bytes < static_cast<int>(sizeof(RTCPHeader))) {
         LOG_WARN("Not enough data for an RTCP packet");
         return false;
@@ -279,12 +291,16 @@ void RtpRtcpHandler::receive_rtcp_packet() {
 
     while (is_running_) {
         // Receive an RTCP packet
-        size_t received_size = recvfrom(rtcp_socket_, buffer, buffer_size, 0,
+        ssize_t received_size = recvfrom(rtcp_socket_, buffer, buffer_size, 0,
                                         (struct sockaddr*)&client_addr, &client_address_len);
 
         // Parse the RTCP packet
         RTCPReceiverReport rr;
-        if (!parse_rtcp_packet(buffer, received_size, rr)) continue;
+        if (received_size > 0 && !parse_rtcp_packet(buffer, received_size, rr)) continue;
+        if (rr.packet_type_ == 203) {
+            LOG_INFO("Receive BYE, exit rtcp receive thread.");
+            break;
+        }
     }
 }
 
@@ -317,8 +333,8 @@ void RtpRtcpHandler::send_rtcp_packet() {
         gettimeofday(&tv, nullptr);
         uint64_t ntp_time = ((uint64_t)tv.tv_sec + NTP_epoch) << 32;
         ntp_time += (uint64_t)tv.tv_usec * (1ull << 32) / 1000000ull;
-        uint32_t ntp_timestamp_msw = (uint32_t)(ntp_time >> 32);
-        uint32_t ntp_timestamp_lsw = (uint32_t)(ntp_time & 0xFFFFFFFF);
+        auto ntp_timestamp_msw = (uint32_t)(ntp_time >> 32);
+        auto ntp_timestamp_lsw = (uint32_t)(ntp_time & 0xFFFFFFFF);
         sr.ntp_timestamp_msw_ = htonl(ntp_timestamp_msw);
         sr.ntp_timestamp_lsw_ = htonl(ntp_timestamp_lsw);
         sr.rtp_timestamp_ = htonl(timestamp_);

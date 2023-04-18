@@ -24,15 +24,15 @@ H264MediaTrack::~H264MediaTrack() {
     if (frame_queue_) frame_queue_.reset();
 }
 
-int H264MediaTrack::read_next_frame() {
+ssize_t H264MediaTrack::read_next_frame() {
     bool frame_start = false;
-    size_t read_bytes;
+    ssize_t read_bytes;
     while (!h264_file_.eof()) {
         // Read the data from the H.264 file into the buffer
         h264_file_.read(frame_buf_, MAX_FRAME_SIZE);
         read_bytes = h264_file_.gcount();
 
-        for (size_t i = 3; i < read_bytes; ++i) {
+        for (ssize_t i = 3; i < read_bytes; ++i) {
             // Check for the start code 0x000001 or 0x00000001
             bool start_code = (i + 2 < read_bytes && frame_buf_[i] == 0x00 && frame_buf_[i + 1] == 0x00 && frame_buf_[i + 2] == 0x01) ||
                               (i + 3 < read_bytes && frame_buf_[i] == 0x00 && frame_buf_[i + 1] == 0x00 && frame_buf_[i + 2] == 0x00 && frame_buf_[i + 3] == 0x01);
@@ -126,6 +126,11 @@ void H264MediaTrack::register_session(const std::string& session_id) {
 
 void H264MediaTrack::unregister_session(const std::string& session_id) {
     frame_queue_->unregister_consumer(session_id);
+    if (frame_queue_->no_consumer()) {
+        LOG_DEBUG("Track: {} no consumer.", track_name_);
+        this->stop();
+        if (h264_file_.is_open()) h264_file_.close();
+    }
 }
 
 std::shared_ptr<FrameData> H264MediaTrack::get_next_frame(const std::string& session_id) {
@@ -135,15 +140,24 @@ std::shared_ptr<FrameData> H264MediaTrack::get_next_frame(const std::string& ses
 void H264MediaTrack::start() {
     if (is_active_) return ;
     is_active_ = true;
+    if (frame_queue_->is_exit()) frame_queue_->set_run();
+    if (!h264_file_.is_open()) {
+        h264_file_.open(url_, std::ios::binary);
+        if (!h264_file_.is_open()) {
+            throw std::runtime_error("Failed to open H.264 file: " + url_);
+        }
+    }
     produce_thread_.reset(new std::thread(&H264MediaTrack::run_producer, this));
 }
 
 void H264MediaTrack::stop() {
     is_active_ = false;
+    frame_queue_->set_exit();
     if (produce_thread_ && produce_thread_->joinable()) {
         produce_thread_->join();
         produce_thread_.reset();
     }
+    frame_queue_->set_exit();
 }
 
 AACMediaTrack::AACMediaTrack(const std::string& track_name, const std::string &url) : track_name_(track_name), url_(url), is_active_(false) {
@@ -164,18 +178,20 @@ AACMediaTrack::~AACMediaTrack() {
     if (frame_queue_) frame_queue_.reset();
 }
 
-int AACMediaTrack::read_next_frame() {
+ssize_t AACMediaTrack::read_next_frame() {
     constexpr size_t adts_header_size = 7;
     uint8_t adts_header[adts_header_size];
     aac_file_.read(reinterpret_cast<char *>(adts_header), adts_header_size);
     if (aac_file_.gcount() != adts_header_size) {
-        throw std::runtime_error("Read adts header error.");
+        LOG_ERROR("Read adts header error.");
+        return -1;
     } else if (adts_header[0] != 0xFF || (adts_header[1] & 0xF0) != 0xF0) {
         LOG_INFO("adts header: {} {}", adts_header[0], adts_header[1]);
-        throw std::runtime_error("adts header format error.");
+        LOG_ERROR("adts header format error.");
+        return -1;
     }
 
-    size_t frame_size = (((adts_header[3] & 0x03) << 11) | ((adts_header[4] & 0xFF) << 3) | ((adts_header[5] & 0xE0) >> 5)) - 7;
+    ssize_t frame_size = (((adts_header[3] & 0x03) << 11) | ((adts_header[4] & 0xFF) << 3) | ((adts_header[5] & 0xE0) >> 5)) - 7;
     aac_file_.read(frame_buf_, frame_size);
     if (aac_file_.gcount() != frame_size) return -1;
     return frame_size;
@@ -216,7 +232,7 @@ int AACMediaTrack::get_media_fps() const {
 void AACMediaTrack::open() {
     aac_file_.open(url_, std::ios::binary);
     if (!aac_file_.is_open()) {
-        throw std::runtime_error("Failed to open H.264 file: " + url_);
+        throw std::runtime_error("Failed to open AAC file: " + url_);
     }
 }
 
@@ -247,6 +263,11 @@ void AACMediaTrack::register_session(const std::string& session_id) {
 
 void AACMediaTrack::unregister_session(const std::string& session_id) {
     frame_queue_->unregister_consumer(session_id);
+    if (frame_queue_->no_consumer()) {
+        LOG_DEBUG("Track: {} no consumer.", track_name_);
+        this->stop();
+        if (aac_file_.is_open()) aac_file_.close();
+    }
 }
 
 std::shared_ptr<FrameData> AACMediaTrack::get_next_frame(const std::string& session_id) {
@@ -256,15 +277,24 @@ std::shared_ptr<FrameData> AACMediaTrack::get_next_frame(const std::string& sess
 void AACMediaTrack::start() {
     if (is_active_) return ;
     is_active_ = true;
+    if (frame_queue_->is_exit()) frame_queue_->set_run();
+    if (!aac_file_.is_open()) {
+        aac_file_.open(url_, std::ios::binary);
+        if (!aac_file_.is_open()) {
+            throw std::runtime_error("Failed to open AAC file: " + url_);
+        }
+    }
     produce_thread_.reset(new std::thread(&AACMediaTrack::run_producer, this));
 }
 
 void AACMediaTrack::stop() {
     is_active_ = false;
+    frame_queue_->set_exit();
     if (produce_thread_ && produce_thread_->joinable()) {
         produce_thread_->join();
         produce_thread_.reset();
     }
+    frame_queue_->set_exit();
 }
 
 MediaSource::MediaSource(const std::string &stream_name) : stream_name_(stream_name) {}

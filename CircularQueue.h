@@ -14,17 +14,24 @@ template <typename T>
 class CircularQueue {
 public:
     CircularQueue(size_t capacity)
-            : buffer_(capacity), write_position_(0) {}
+            : buffer_(capacity), write_position_(0), exit_(false) {}
 
     void set_exit() {
         std::unique_lock<std::mutex> lock(mutex_);
         exit_ = true;
         not_empty_.notify_all();
+        not_full_.notify_all();
     }
 
     bool is_exit() {
         std::unique_lock<std::mutex> lock(mutex_);
         return exit_;
+    }
+
+    void set_run() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        exit_ = false;
+        not_full_.notify_all();
     }
 
     void produce(const T& item) {
@@ -33,7 +40,7 @@ public:
         size_t next_position = (write_position_ + 1) % buffer_.size();
 
         // Wait until all consumers have consumed the data in the next slot
-        while (is_position_in_use(next_position)) {
+        while (is_position_in_use(next_position) && !exit_) {
             not_full_.wait(lock);
         }
 
@@ -73,6 +80,11 @@ public:
     void unregister_consumer(const std::string& session_id) {
         std::unique_lock<std::mutex> lock(mutex_);
         consumer_positions_.erase(session_id);
+    }
+
+    bool no_consumer() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return consumer_positions_.empty();
     }
 
 private:
